@@ -1,0 +1,10 @@
+{
+  "name": "tangle-website",
+  "dependencies": {
+    "esbuild": "0.17.3"
+  },
+  "scripts": {
+    "build": "esbuild index.ts --bundle --outfile=dist/index.js --format=esm --sourcemap && cp ../tangle/tangle_ts/dist/rust_utilities.wasm dist/rust_utilities.wasm && asc demos/demo1 --outFile dist/demo1.wasm && asc demos/demo2 --outFile dist/demo2.wasm",
+    "build_release": "esbuild index.ts --bundle --outfile=dist/index.js --format=esm && cp ../tangle/tangle_ts/dist/rust_utilities.wasm dist/rust_utilities.wasm"
+  }
+}

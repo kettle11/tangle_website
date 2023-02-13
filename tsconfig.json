@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "allowJs": true,
+    "target": "ES2020",
+    "strict": true,
+  },
+  "include": [
+    "index.ts",
+  ],
+  "paths": {
+    "@tangle": [
+      "../tangle/tangle_ts/src/index"
+    ],
+  }
+}
