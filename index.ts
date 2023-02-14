@@ -96,6 +96,7 @@ async function setup_demo1() {
         return svg;
     };
 
+
     let imports = {
         env: {
             set_color: function (r: number, g: number, b: number, a: number) {
@@ -120,8 +121,28 @@ async function setup_demo1() {
             move_to: function (x: number, y: number) {
                 context.moveTo(x, y);
             },
+            line_to: function (x: number, y: number) {
+                context.lineTo(x, y);
+            },
             stroke: function () {
                 context.stroke();
+            },
+            fill: function () {
+                context.fill();
+            },
+            translate: function (x: number, y: number) {
+                context.translate(x, y);
+            },
+            rotate: function (radians: number) {
+                context.rotate(radians);
+            },
+            draw_rect: function (x: number, y: number, width: number, height: number) {
+                context.beginPath();
+                context.rect(x, y, width, height);
+                context.fill();
+            },
+            set_transform: function (a: number, b: number, c: number, d: number, e: number, f: number) {
+                context.setTransform(a, b, c, d, e, f);
             }
         },
     };
@@ -149,12 +170,12 @@ async function setup_demo1() {
         }
     };
 
-    /*
     document.onpointermove = async (event) => {
         let rect = canvas.getBoundingClientRect();
-        tangle.call("pointer_move", [UserId, event.clientX - rect.left, event.clientY - rect.top]);
+        if (exports.pointer_move) {
+            exports.pointer_move(UserId, event.clientX - rect.left, event.clientY - rect.top);
+        }
     };
-    */
 
     document.onpointerup = async (event) => {
         let rect = canvas.getBoundingClientRect();
@@ -168,6 +189,9 @@ async function setup_demo1() {
         let rect = canvas.getBoundingClientRect();
         if (exports.key_down) {
             exports.key_down(UserId, event.keyCode);
+        }
+        if (event.key == "h") {
+            tangle.print_history();
         }
     };
 

@@ -557,6 +557,8 @@ function time_stamp_compare(a, b) {
   return 0;
 }
 var decoder2 = new TextDecoder();
+var action_log = "";
+var debug_mode = false;
 var TimeMachine = class {
   constructor(wasm_instance, rust_utilities) {
     this._current_simulation_time = { time: 0, player_id: 0 };
@@ -644,9 +646,12 @@ var TimeMachine = class {
     return this._export_keys[function_index];
   }
   /// Returns the function call of this instance.
-  async call_with_time_stamp(function_export_index, args, time_stamp, record_hash = false) {
+  async call_with_time_stamp(function_export_index, args, time_stamp) {
     if (time_stamp_compare(time_stamp, this._snapshots[0].time_stamp) == -1) {
       console.error("[tangle error] Attempting to rollback to before earliest safe time");
+      console.error("Event Time: ", time_stamp);
+      console.error("Earlieset Snapshot Time: ", this._snapshots[0].time_stamp);
+      throw new Error("[tangle error] Attempting to rollback to before earliest safe time");
     }
     this._progress_recurring_function_calls(time_stamp.time);
     let i = this._events.length - 1;
@@ -657,20 +662,33 @@ var TimeMachine = class {
             break outer_loop;
           case 1:
             break;
-          case 0:
-            console.error("[tangle error] Attempted to call a function with a duplicate time stamp.");
+          case 0: {
+            const event2 = this._events[i];
+            if (function_export_index != event2.function_export_index || !array_equals(args, event2.args)) {
+              console.error("[tangle error] Attempted to call a function with a duplicate time stamp.");
+              console.log("Event Time: ", time_stamp);
+              console.log("Function name: ", this.get_function_name(function_export_index));
+              throw new Error("[tangle error] Attempted to call a function with a duplicate time stamp.");
+            }
             return;
+          }
         }
       }
     if (time_stamp_compare(time_stamp, this._current_simulation_time) == -1) {
-      this._need_to_rollback_to_time = time_stamp;
+      if (this._need_to_rollback_to_time === void 0 || time_stamp_compare(time_stamp, this._need_to_rollback_to_time) == -1) {
+        this._need_to_rollback_to_time = time_stamp;
+      }
     }
-    this._events.splice(i + 1, 0, {
+    const event = {
       function_export_index,
       args,
-      time_stamp,
-      record_hash
-    });
+      time_stamp
+    };
+    this._events.splice(i + 1, 0, event);
+    if (debug_mode) {
+      action_log += `Inserting call ${i + 1} ${event.time_stamp.time} ${event.time_stamp.player_id} ${this.get_function_name(event.function_export_index)}
+`;
+    }
   }
   /// Call a function but ensure its results do not persist and cannot cause a desync.
   /// This can be used for things like drawing or querying from the Wasm
@@ -712,6 +730,10 @@ var TimeMachine = class {
   /// Call this is in a loop and if it returns true continue. 
   step() {
     if (this._need_to_rollback_to_time !== void 0) {
+      if (debug_mode) {
+        action_log += `Target rollback time: ${this._need_to_rollback_to_time.time} ${this._need_to_rollback_to_time.player_id}
+`;
+      }
       let i2 = this._snapshots.length - 1;
       for (; i2 >= 0; --i2) {
         if (time_stamp_compare(this._need_to_rollback_to_time, this._snapshots[i2].time_stamp) != -1) {
@@ -721,6 +743,10 @@ var TimeMachine = class {
       const snap_shot = this._snapshots[i2];
       this._apply_snapshot(snap_shot);
       this._snapshots.splice(i2, this._snapshots.length - i2);
+      if (debug_mode) {
+        action_log += `Rolling back to: ${snap_shot.time_stamp.time} ${snap_shot.time_stamp.player_id}
+`;
+      }
       this._current_simulation_time = snap_shot.time_stamp;
       this._need_to_rollback_to_time = void 0;
     }
@@ -734,10 +760,14 @@ var TimeMachine = class {
     const function_call = this._events[i];
     if (function_call !== void 0 && function_call.time_stamp.time <= this._target_time) {
       const f = this._exports[function_call.function_export_index];
-      if (function_call.record_hash) {
-      }
       f(...function_call.args);
-      if (function_call.record_hash) {
+      if (debug_mode) {
+        function_call.hash = this.hash_wasm_state();
+      }
+      if (action_log) {
+        const event = function_call;
+        action_log += `i ${event.time_stamp.time} ${event.time_stamp.player_id} ${this.get_function_name(event.function_export_index)} ${event.hash}
+`;
       }
       this._current_simulation_time = function_call.time_stamp;
       return true;
@@ -760,6 +790,9 @@ var TimeMachine = class {
     }
   }
   remove_history_before(time) {
+    if (debug_mode) {
+      return;
+    }
     let i = 0;
     for (; i < this._snapshots.length - 1; ++i) {
       if (this._snapshots[i].time_stamp.time >= time) {
@@ -886,13 +919,22 @@ var TimeMachine = class {
   }
   print_history() {
     let history = "";
+    let previous_time_stamp = { time: -1, player_id: 0 };
     for (const event of this._events) {
-      history += `${event.time_stamp.time} ${event.time_stamp.player_id} ${event.function_export_index}
+      if (time_stamp_compare(previous_time_stamp, event.time_stamp) != -1) {
+        history += "ERROR: OUT OF ORDER TIMESTAMPS\n";
+      }
+      history += `${event.time_stamp.time} ${event.time_stamp.player_id} ${this.get_function_name(event.function_export_index)} ${event.hash}
 `;
+      previous_time_stamp = event.time_stamp;
     }
+    console.log(action_log);
     console.log(history);
   }
 };
+function array_equals(a, b) {
+  return a.length === b.length && a.every((val, index) => val === b[index]);
+}
 
 // ../tangle/tangle_ts/src/tangle.ts
 var UserIdType = class {
@@ -967,14 +1009,12 @@ var Tangle = class {
       ice_servers: this._configuration.ice_servers,
       room_name,
       on_peer_joined: (peer_id) => {
-        this._run_inner_function(async () => {
-          this._peer_data.set(peer_id, {
-            last_sent_message: 0,
-            last_received_message: Number.MAX_VALUE,
-            round_trip_time: 0
-          });
-          this._room.send_message(this._encode_bounce_back_message(), peer_id);
+        this._peer_data.set(peer_id, {
+          last_sent_message: 0,
+          last_received_message: 0,
+          round_trip_time: 0
         });
+        this._room.send_message(this._encode_bounce_back_message(), peer_id);
       },
       on_peer_left: (peer_id) => {
         this._run_inner_function(async () => {
@@ -1047,7 +1087,7 @@ var Tangle = class {
                 });
               } else {
                 console.log("Remote Wasm call: ", this._time_machine.get_function_name(m.function_index));
-                await this._time_machine.call_with_time_stamp(m.function_index, m.args, time_stamp, true);
+                await this._time_machine.call_with_time_stamp(m.function_index, m.args, time_stamp);
                 if (!this._time_machine._fixed_update_interval) {
                   this.progress_time();
                 }
@@ -1197,8 +1237,10 @@ var Tangle = class {
       this._message_time_offset += 1e-4;
       const function_index = this._time_machine.get_function_export_index(function_name);
       if (function_index !== void 0) {
-        await this._time_machine.call_with_time_stamp(function_index, args_processed, time_stamp, true);
-        this._room.send_message(this._encode_wasm_call_message(function_index, time_stamp.time, args_processed));
+        await this._time_machine.call_with_time_stamp(function_index, args_processed, time_stamp);
+        if (this._tangle_state == 1 /* Connected */) {
+          this._room.send_message(this._encode_wasm_call_message(function_index, time_stamp.time, args_processed));
+        }
         for (const value of this._peer_data.values()) {
           value.last_sent_message = Math.max(value.last_received_message, time_stamp.time);
         }
@@ -1232,14 +1274,17 @@ var Tangle = class {
     const performance_now = performance.now();
     if (this._last_performance_now) {
       let time_progressed = performance_now - this._last_performance_now;
-      const time_diff = this._time_machine.target_time() + time_progressed - this._time_machine.current_simulation_time();
-      if (this._time_machine._fixed_update_interval !== void 0 && time_diff > 2e3) {
-        time_progressed = this._time_machine._fixed_update_interval;
-        if (this._peer_data.size > 0) {
-          console.log("[tangle] Fallen over 2 seconds behind, attempting to resync with room");
-          this._request_heap();
-        } else {
-          console.log("[tangle] Fallen over 2 seconds behind but this is a single-player session, so ignoring this");
+      const check_for_resync = true;
+      if (check_for_resync) {
+        const time_diff = this._time_machine.target_time() + time_progressed - this._time_machine.current_simulation_time();
+        if (this._time_machine._fixed_update_interval !== void 0 && time_diff > 2e3) {
+          time_progressed = this._time_machine._fixed_update_interval;
+          if (this._peer_data.size > 0) {
+            console.log("[tangle] Fallen over 2 seconds behind, attempting to resync with room");
+            this._request_heap();
+          } else {
+            console.log("[tangle] Fallen over 2 seconds behind but this is a single-player session, so ignoring this");
+          }
         }
       }
       await this._time_machine.progress_time(time_progressed);
@@ -1252,12 +1297,14 @@ var Tangle = class {
         }
       }
       let earliest_safe_memory = this._time_machine.current_simulation_time();
-      for (const [peer_id, value] of this._peer_data) {
-        earliest_safe_memory = Math.min(earliest_safe_memory, value.last_received_message);
-        const KEEP_ALIVE_THRESHOLD = 200;
-        const current_time = this._time_machine.target_time();
-        if (current_time - value.last_sent_message > KEEP_ALIVE_THRESHOLD) {
-          this._room.send_message(this._encode_time_progressed_message(current_time), peer_id);
+      if (this._tangle_state == 1 /* Connected */) {
+        for (const [peer_id, value] of this._peer_data) {
+          earliest_safe_memory = Math.min(earliest_safe_memory, value.last_received_message);
+          const KEEP_ALIVE_THRESHOLD = 200;
+          const current_time = this._time_machine.target_time();
+          if (current_time - value.last_sent_message > KEEP_ALIVE_THRESHOLD) {
+            this._room.send_message(this._encode_time_progressed_message(current_time), peer_id);
+          }
         }
       }
       this._time_machine.remove_history_before(earliest_safe_memory - 50);
@@ -1273,8 +1320,8 @@ var Tangle = class {
   read_string(address, length) {
     return this._time_machine.read_string(address, length);
   }
-  disconnect() {
-    this._room.disconnect();
+  print_history() {
+    this._time_machine.print_history();
   }
 };
 
@@ -1380,8 +1427,28 @@ async function setup_demo1() {
       move_to: function(x, y) {
         context.moveTo(x, y);
       },
+      line_to: function(x, y) {
+        context.lineTo(x, y);
+      },
       stroke: function() {
         context.stroke();
+      },
+      fill: function() {
+        context.fill();
+      },
+      translate: function(x, y) {
+        context.translate(x, y);
+      },
+      rotate: function(radians) {
+        context.rotate(radians);
+      },
+      draw_rect: function(x, y, width, height) {
+        context.beginPath();
+        context.rect(x, y, width, height);
+        context.fill();
+      },
+      set_transform: function(a, b, c, d, e, f) {
+        context.setTransform(a, b, c, d, e, f);
       }
     }
   };
@@ -1405,6 +1472,12 @@ async function setup_demo1() {
       exports.pointer_down(UserId, event.clientX - rect.left, event.clientY - rect.top);
     }
   };
+  document.onpointermove = async (event) => {
+    let rect = canvas.getBoundingClientRect();
+    if (exports.pointer_move) {
+      exports.pointer_move(UserId, event.clientX - rect.left, event.clientY - rect.top);
+    }
+  };
   document.onpointerup = async (event) => {
     let rect = canvas.getBoundingClientRect();
     if (exports.pointer_up) {
@@ -1415,6 +1488,9 @@ async function setup_demo1() {
     let rect = canvas.getBoundingClientRect();
     if (exports.key_down) {
       exports.key_down(UserId, event.keyCode);
+    }
+    if (event.key == "h") {
+      tangle.print_history();
     }
   };
   document.onkeyup = async (event) => {
