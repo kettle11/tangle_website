@@ -68,16 +68,19 @@
             transition: opacity 0.2s;
             opacity: 0;
             margin-left: 0;
+            z-index: -1;
         }
 
         #demo1 {
             width: 100%;
-            height: 500px;
+            height: 600px;
             position: absolute;
+            touch-action: none;
         }
 
         #title {
             margin-left: 4rem;
+            margin-right: 4rem;
         }
 
         #body_text {
@@ -88,6 +91,10 @@
             margin-bottom: 4rem;
             line-height: 1.5rem;
         }
+
+        p {
+            margin-bottom: 2rem;
+        }
     </style>
 </head>
 
@@ -95,62 +102,30 @@
     <canvas id="demo1"></canvas>
     <div style="height: 4rem;"></div>
     <div id="title">
-        <div style="display: flex">
-            <h1><img src="logo.svg"
-                    style="height: 2.0rem; vertical-align:middle; margin-top: -0.4rem; margin-right: 1.0rem;" />Tangle
-            </h1>
+        <div style="display: flex; align-items: center;">
+            <h1>Tangle</h1>
             <h3 id="alpha_text">Alpha</h3>
+            <a href="https://github.com/kettle11/tangle"
+                style="margin-left: auto;  vertical-align:middle; margin-top: -0.4rem; margin-right: 1.0rem; ">
+                <img src=" mark-github-24.svg" />
+            </a>
         </div>
     </div>
     <div id="body_text">
-        <div style="height: 250px;"></div>
-        <h2>What is this?</h2>
+        <div style="height: 400px;"></div>
         <p>
-            Tangle is an open-source library that takes unnetworked WebAssembly and automatically makes it
-            multiplayer.
-            <br>
-            The Wasm program does not need to worry about message passing, serialization, or consensus. From its
-            perspective it's not even networked!
-            <br>
-            The Wasm programs are effectively 'entangled' like quantum particles.
+            Drag blocks around. Open this page in a new tab or share the URL to try multiplayer!
         </p>
-        <h2>What is Tangle good for?</h2>
+        <h2>What is Tangle?</h2>
         <p>
-            Tangle makes it far easier to build multiplayer apps and games.
+            Tangle is an <a href="https://github.com/kettle11/tangle">open-source</a> JavaScript library that makes it
+            radically easier to build multiplayer and networked programs.
         </p>
         <p>
-            In the future Tangle may be useful for syncing programs between servers / clients, untrusted plugins in
-            networked software, 'metaverse'-like scripting, backend-less collaborative software, and more!
-        </p>
-        <h2>How much does it cost?</h2>
-        <p>
-            Tangle is a free and open-source library.
-            <br>
-            Connections are peer to peer and I run a free server that facilitates those connections.
-            <br>
-            If there is demand I will consider offering paid services that can handle more traffic and give Tangle
-            server-backed super-powers. Stay tuned for more on that later.
-        </p>
-        <h2>How does it work?</h2>
-        <p>
-            Tangle syncs initial state and networks all subsequent inputs that could cause simulations to
-            diverge. Tangle keeps every bit identical between all connected Wasm instances.
-            <br>
-            'Snapshots' are taken at each simulation step to enable 'rewinding' and 'replaying' events to
-            ensure all peers apply events in the same order, without adding latency to user input.
-        </p>
-        <h2>What are its limits?</h2>
-        <p>Due to how rollback works frequently updated programs will have increased input latency
-            if they do not keep CPU
-            and memory usage low. This is an area that will see future improvement.
-        <p>
-            Tangle does nothing to merge long stretches of offline editing. It is not a CRDT.
-        </p>
-        <h2>WARNING</h2>
-        <p>
-            Tangle is incredibly new. <br>
-            It has plenty of bugs, missing features, and is absolutely not production
-            ready!
+            Note: Tangle is <i>incredibly</i> new and has many bugs and missing features. <br>
+            Check out the project on GitHub
+            if
+            you'd like to help!
         </p>
     </div>
     <script src="index.js" type="module"></script>

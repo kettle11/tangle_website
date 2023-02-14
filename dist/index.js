@@ -1227,11 +1227,20 @@ var Tangle = class {
       }
     });
   }
+  _median_round_trip_latency() {
+    const latencies = Array.from(this._peer_data.values()).map((peer) => peer.round_trip_time).sort();
+    return latencies[Math.floor(latencies.length / 2)];
+  }
   call(function_name, ...args) {
     this._run_inner_function(async () => {
       const args_processed = this._process_args(args);
+      let median_round_trip_latency = this._median_round_trip_latency();
+      if (median_round_trip_latency === void 0 || median_round_trip_latency < 60) {
+        median_round_trip_latency = 0;
+      }
+      median_round_trip_latency = Math.min(median_round_trip_latency, 200);
       const time_stamp = {
-        time: this._time_machine.target_time() + this._message_time_offset,
+        time: this._time_machine.target_time() + this._message_time_offset + median_round_trip_latency / 2,
         player_id: this._room.my_id
       };
       this._message_time_offset += 1e-4;
@@ -1277,13 +1286,13 @@ var Tangle = class {
       const check_for_resync = true;
       if (check_for_resync) {
         const time_diff = this._time_machine.target_time() + time_progressed - this._time_machine.current_simulation_time();
-        if (this._time_machine._fixed_update_interval !== void 0 && time_diff > 2e3) {
+        if (this._time_machine._fixed_update_interval !== void 0 && time_diff > 3e3) {
           time_progressed = this._time_machine._fixed_update_interval;
           if (this._peer_data.size > 0) {
-            console.log("[tangle] Fallen over 2 seconds behind, attempting to resync with room");
-            this._request_heap();
+            location.reload();
+            console.log("[tangle] Fallen behind, reloading room");
           } else {
-            console.log("[tangle] Fallen over 2 seconds behind but this is a single-player session, so ignoring this");
+            console.log("[tangle] Fallen behind but this is a single-player session, so ignoring this");
           }
         }
       }
