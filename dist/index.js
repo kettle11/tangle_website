@@ -470,7 +470,8 @@ var RustUtilities = class {
     const url = new URL(import.meta.url);
     const url_without_file = url.origin + url.pathname.substring(0, url.pathname.lastIndexOf("/") + 1);
     const final_url = new URL("rust_utilities.wasm", url_without_file);
-    const rust_utilities = await WebAssembly.instantiateStreaming(fetch(final_url), imports);
+    const binary = await fetch(final_url).then((response) => response.arrayBuffer());
+    const rust_utilities = await WebAssembly.instantiate(binary, imports);
     return new RustUtilities(rust_utilities);
   }
   gzip_decode(data_to_decode) {
