@@ -941,6 +941,7 @@ function array_equals(a, b) {
 var UserIdType = class {
 };
 var UserId = new UserIdType();
+var ROUND_TRIP_TIME_ROLLING_AVERAGE_ALPHA = 0.9;
 var Tangle = class {
   constructor(time_machine) {
     this._buffered_messages = [];
@@ -1013,9 +1014,11 @@ var Tangle = class {
         this._peer_data.set(peer_id, {
           last_sent_message: 0,
           last_received_message: 0,
-          round_trip_time: 0
+          round_trip_time: 0,
+          estimated_current_time_measurement: 0,
+          estimated_current_time: void 0
         });
-        this._room.send_message(this._encode_bounce_back_message(), peer_id);
+        this._room.send_message(this._encode_ping_message(), peer_id);
       },
       on_peer_left: (peer_id) => {
         this._run_inner_function(async () => {
@@ -1116,13 +1119,23 @@ var Tangle = class {
               break;
             }
             case 5 /* Ping */: {
-              message[0] = 6 /* Pong */;
-              this._room.send_message(message, peer_id);
+              const writer = new MessageWriterReader(this._outgoing_message_buffer);
+              writer.write_u8(6 /* Pong */);
+              writer.write_raw_bytes(message_data);
+              writer.write_f64(this._average_current_time(performance.now()));
+              this._room.send_message(writer.get_result_array(), peer_id);
               break;
             }
             case 6 /* Pong */: {
-              const time = this._decode_bounce_back_return(message_data);
-              peer.round_trip_time = Date.now() - time;
+              const { time_sent, current_time } = this._decode_pong_message(message_data);
+              const new_round_trip_time = Date.now() - time_sent;
+              if (peer.round_trip_time == 0) {
+                peer.round_trip_time = new_round_trip_time;
+              } else {
+                peer.round_trip_time = peer.round_trip_time * ROUND_TRIP_TIME_ROLLING_AVERAGE_ALPHA + (1 - ROUND_TRIP_TIME_ROLLING_AVERAGE_ALPHA) * new_round_trip_time;
+              }
+              peer.estimated_current_time = current_time + peer.round_trip_time / 2;
+              peer.estimated_current_time_measurement = performance.now();
               break;
             }
           }
@@ -1164,7 +1177,7 @@ var Tangle = class {
     const lowest_latency_peer = this._room.get_lowest_latency_peer();
     if (lowest_latency_peer) {
       this._change_state(2 /* RequestingHeap */);
-      this._room.send_message(this._encode_bounce_back_message(), lowest_latency_peer);
+      this._room.send_message(this._encode_ping_message(), lowest_latency_peer);
       this._room.send_message(this._encode_request_heap_message(), lowest_latency_peer);
     }
   }
@@ -1209,15 +1222,17 @@ var Tangle = class {
     this._outgoing_message_buffer[0] = 2 /* RequestState */;
     return this._outgoing_message_buffer.subarray(0, 1);
   }
-  _encode_bounce_back_message() {
+  _encode_ping_message() {
     const writer = new MessageWriterReader(this._outgoing_message_buffer);
     writer.write_u8(5 /* Ping */);
     writer.write_f64(Date.now());
     return writer.get_result_array();
   }
-  _decode_bounce_back_return(data) {
+  _decode_pong_message(data) {
     const reader = new MessageWriterReader(data);
-    return reader.read_f64();
+    const time_sent = reader.read_f64();
+    const current_time = reader.read_f64();
+    return { time_sent, current_time };
   }
   _process_args(args) {
     return args.map((a) => {
@@ -1249,6 +1264,7 @@ var Tangle = class {
       if (function_index !== void 0) {
         await this._time_machine.call_with_time_stamp(function_index, args_processed, time_stamp);
         if (this._tangle_state == 1 /* Connected */) {
+          this._room.send_message(this._encode_ping_message());
           this._room.send_message(this._encode_wasm_call_message(function_index, time_stamp.time, args_processed));
         }
         for (const value of this._peer_data.values()) {
@@ -1283,7 +1299,11 @@ var Tangle = class {
   async _progress_time_inner() {
     const performance_now = performance.now();
     if (this._last_performance_now) {
-      let time_progressed = performance_now - this._last_performance_now;
+      const average_current_time = this._average_current_time(performance_now);
+      const difference_from_peers = average_current_time - this.current_time(performance_now);
+      let time_progressed = performance_now - this._last_performance_now + difference_from_peers;
+      console.log("DIFFERENCE FROM PEERS: ", difference_from_peers);
+      time_progressed = Math.max(time_progressed, 1e-4);
       const check_for_resync = true;
       if (check_for_resync) {
         const time_diff = this._time_machine.target_time() + time_progressed - this._time_machine.current_simulation_time();
@@ -1312,17 +1332,44 @@ var Tangle = class {
           earliest_safe_memory = Math.min(earliest_safe_memory, value.last_received_message);
           const KEEP_ALIVE_THRESHOLD = 200;
           const current_time = this._time_machine.target_time();
-          if (current_time - value.last_sent_message > KEEP_ALIVE_THRESHOLD) {
+          const difference = current_time - value.last_sent_message;
+          if (difference > KEEP_ALIVE_THRESHOLD) {
+            this._room.send_message(this._encode_ping_message(), peer_id);
             this._room.send_message(this._encode_time_progressed_message(current_time), peer_id);
+          }
+          if (difference <= 0) {
+            console.error("SHOULD NOT BE HERE!");
           }
         }
       }
-      this._time_machine.remove_history_before(earliest_safe_memory - 50);
+      this._time_machine.remove_history_before(earliest_safe_memory);
       if (time_progressed > 0) {
         this._message_time_offset = 0;
       }
     }
     this._last_performance_now = performance_now;
+  }
+  _average_current_time(now) {
+    let current_time = this._time_machine.target_time();
+    if (this._last_performance_now) {
+      current_time += now - this._last_performance_now;
+    }
+    let count = 1;
+    for (const peer of this._peer_data.values()) {
+      if (peer.estimated_current_time) {
+        current_time += peer.estimated_current_time + (now - peer.estimated_current_time_measurement);
+        count += 1;
+      }
+    }
+    current_time = current_time / count;
+    return current_time;
+  }
+  current_time(now) {
+    let time = this._time_machine.target_time();
+    if (this._last_performance_now) {
+      time += now - this._last_performance_now;
+    }
+    return time;
   }
   read_memory(address, length) {
     return this._time_machine.read_memory(address, length);
@@ -1491,7 +1538,9 @@ async function setup_demo1() {
   document.onpointerup = async (event) => {
     let rect = canvas.getBoundingClientRect();
     if (exports.pointer_up) {
-      exports.pointer_up(UserId, event.clientX - rect.left, event.clientY - rect.top);
+      console.log("EVENT POINTER TYPE: ", event.pointerType);
+      console.log(event.pointerType === "mouse");
+      exports.pointer_up(UserId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
     }
   };
   document.onkeydown = async (event) => {

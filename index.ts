@@ -181,7 +181,9 @@ async function setup_demo1() {
         let rect = canvas.getBoundingClientRect();
 
         if (exports.pointer_up) {
-            exports.pointer_up(UserId, event.clientX - rect.left, event.clientY - rect.top);
+            console.log("EVENT POINTER TYPE: ", event.pointerType);
+            console.log(event.pointerType === "mouse");
+            exports.pointer_up(UserId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
         }
     };
 
