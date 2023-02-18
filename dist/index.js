@@ -24,7 +24,8 @@ var Room = class {
     this._peers = /* @__PURE__ */ new Map();
     this._configuration = {};
     this._outgoing_data_chunk = new Uint8Array(MAX_MESSAGE_SIZE + 5);
-    this.my_id = 0;
+    // Default to 1 because 0 conflicts with the 'system' ID.
+    this.my_id = 1;
     // Used for testing
     this._artificial_delay = 0;
     this._rust_utilities = rust_utilities;
@@ -630,6 +631,7 @@ var TimeMachine = class {
       time_machine._fixed_update_interval = void 0;
     }
     time_machine._snapshots = [time_machine._get_wasm_snapshot()];
+    console.log("\u{1F680}\u23F3 Time Machine Activated \u23F3\u{1F680}");
     return time_machine;
   }
   read_memory(address, length) {
@@ -666,10 +668,9 @@ var TimeMachine = class {
           case 0: {
             const event2 = this._events[i];
             if (function_export_index != event2.function_export_index || !array_equals(args, event2.args)) {
-              console.error("[tangle error] Attempted to call a function with a duplicate time stamp.");
+              console.error("[tangle warning] Attempted to call a function with a duplicate time stamp.");
               console.log("Event Time: ", time_stamp);
               console.log("Function name: ", this.get_function_name(function_export_index));
-              throw new Error("[tangle error] Attempted to call a function with a duplicate time stamp.");
             }
             return;
           }
@@ -906,7 +907,7 @@ var TimeMachine = class {
         args
       };
       if (!(time_stamp_compare(last_time_stamp, time_stamp) == -1)) {
-        console.log("ERROR: INCOMING TIME STAMPS OUT OF ORDER");
+        console.error("[time-machine] Error: Incoming time stamps out of order");
       }
       last_time_stamp = time_stamp;
     }
@@ -938,6 +939,12 @@ function array_equals(a, b) {
 }
 
 // ../tangle/tangle_ts/src/tangle.ts
+var TangleState = /* @__PURE__ */ ((TangleState2) => {
+  TangleState2[TangleState2["Disconnected"] = 0] = "Disconnected";
+  TangleState2[TangleState2["Connected"] = 1] = "Connected";
+  TangleState2[TangleState2["RequestingHeap"] = 2] = "RequestingHeap";
+  return TangleState2;
+})(TangleState || {});
 var UserIdType = class {
 };
 var UserId = new UserIdType();
@@ -953,6 +960,7 @@ var Tangle = class {
     this._configuration = {};
     this._outgoing_message_buffer = new Uint8Array(500);
     this._message_time_offset = 0;
+    this._last_sent_message = 0;
     this._time_machine = time_machine;
     this._rust_utilities = time_machine.rust_utilities;
   }
@@ -995,6 +1003,8 @@ var Tangle = class {
   _change_state(state) {
     if (this._tangle_state != state) {
       if (state == 1 /* Connected */) {
+        console.log("\u{1F331} Tangle State: ", TangleState[state]);
+        console.log("Learn more about Tangle at https://tanglesync.com");
         this._last_performance_now = performance.now();
       }
       this._tangle_state = state;
@@ -1012,7 +1022,6 @@ var Tangle = class {
       room_name,
       on_peer_joined: (peer_id) => {
         this._peer_data.set(peer_id, {
-          last_sent_message: 0,
           last_received_message: 0,
           round_trip_time: 0,
           estimated_current_time_measurement: 0,
@@ -1090,7 +1099,7 @@ var Tangle = class {
                   args: m.args
                 });
               } else {
-                console.log("Remote Wasm call: ", this._time_machine.get_function_name(m.function_index));
+                console.log("[tangle] Remote Wasm call: ", this._time_machine.get_function_name(m.function_index));
                 await this._time_machine.call_with_time_stamp(m.function_index, m.args, time_stamp);
                 if (!this._time_machine._fixed_update_interval) {
                   this.progress_time();
@@ -1236,7 +1245,7 @@ var Tangle = class {
   }
   _process_args(args) {
     return args.map((a) => {
-      if (typeof a != "number") {
+      if (a instanceof UserIdType) {
         return this._room.my_id;
       } else {
         return a;
@@ -1254,9 +1263,10 @@ var Tangle = class {
       if (median_round_trip_latency === void 0 || median_round_trip_latency < 60) {
         median_round_trip_latency = 0;
       }
-      median_round_trip_latency = Math.min(median_round_trip_latency, 200);
+      median_round_trip_latency = Math.min(median_round_trip_latency, 150);
+      const message_time = Math.max(this._last_sent_message, this._time_machine.target_time() + median_round_trip_latency) + this._message_time_offset;
       const time_stamp = {
-        time: this._time_machine.target_time() + this._message_time_offset + median_round_trip_latency / 2,
+        time: message_time,
         player_id: this._room.my_id
       };
       this._message_time_offset += 1e-4;
@@ -1267,9 +1277,7 @@ var Tangle = class {
           this._room.send_message(this._encode_ping_message());
           this._room.send_message(this._encode_wasm_call_message(function_index, time_stamp.time, args_processed));
         }
-        for (const value of this._peer_data.values()) {
-          value.last_sent_message = Math.max(value.last_received_message, time_stamp.time);
-        }
+        this._last_sent_message = Math.max(this._last_sent_message, time_stamp.time);
       }
     });
     this.progress_time();
@@ -1302,16 +1310,16 @@ var Tangle = class {
       const average_current_time = this._average_current_time(performance_now);
       const difference_from_peers = average_current_time - this.current_time(performance_now);
       let time_progressed = performance_now - this._last_performance_now + difference_from_peers;
-      console.log("DIFFERENCE FROM PEERS: ", difference_from_peers);
-      time_progressed = Math.max(time_progressed, 1e-4);
+      time_progressed = Math.max(time_progressed, 1e-3);
       const check_for_resync = true;
-      if (check_for_resync) {
+      if (check_for_resync && this._tangle_state == 1 /* Connected */) {
         const time_diff = this._time_machine.target_time() + time_progressed - this._time_machine.current_simulation_time();
         if (this._time_machine._fixed_update_interval !== void 0 && time_diff > 3e3) {
           time_progressed = this._time_machine._fixed_update_interval;
           if (this._peer_data.size > 0) {
-            location.reload();
             console.log("[tangle] Fallen behind, reloading room");
+            console.log("Fallen behind amount: ", time_diff);
+            location.reload();
           } else {
             console.log("[tangle] Fallen behind but this is a single-player session, so ignoring this");
           }
@@ -1328,23 +1336,20 @@ var Tangle = class {
       }
       let earliest_safe_memory = this._time_machine.current_simulation_time();
       if (this._tangle_state == 1 /* Connected */) {
-        for (const [peer_id, value] of this._peer_data) {
+        for (const value of this._peer_data.values()) {
           earliest_safe_memory = Math.min(earliest_safe_memory, value.last_received_message);
-          const KEEP_ALIVE_THRESHOLD = 200;
-          const current_time = this._time_machine.target_time();
-          const difference = current_time - value.last_sent_message;
-          if (difference > KEEP_ALIVE_THRESHOLD) {
-            this._room.send_message(this._encode_ping_message(), peer_id);
-            this._room.send_message(this._encode_time_progressed_message(current_time), peer_id);
-          }
-          if (difference <= 0) {
-            console.error("SHOULD NOT BE HERE!");
-          }
+        }
+        const KEEP_ALIVE_THRESHOLD = 200;
+        const current_time = this._time_machine.target_time();
+        const difference = current_time - this._last_sent_message;
+        if (difference > KEEP_ALIVE_THRESHOLD) {
+          this._room.send_message(this._encode_ping_message());
+          this._room.send_message(this._encode_time_progressed_message(current_time));
         }
       }
       this._time_machine.remove_history_before(earliest_safe_memory);
       if (time_progressed > 0) {
-        this._message_time_offset = 0;
+        this._message_time_offset = 1e-4;
       }
     }
     this._last_performance_now = performance_now;
@@ -1355,10 +1360,12 @@ var Tangle = class {
       current_time += now - this._last_performance_now;
     }
     let count = 1;
-    for (const peer of this._peer_data.values()) {
-      if (peer.estimated_current_time) {
-        current_time += peer.estimated_current_time + (now - peer.estimated_current_time_measurement);
-        count += 1;
+    if (this._tangle_state == 1 /* Connected */) {
+      for (const peer of this._peer_data.values()) {
+        if (peer.estimated_current_time) {
+          current_time += peer.estimated_current_time + (now - peer.estimated_current_time_measurement);
+          count += 1;
+        }
       }
     }
     current_time = current_time / count;
@@ -1384,99 +1391,20 @@ var Tangle = class {
 
 // index.ts
 async function setup_demo1() {
-  let extra_elements = [];
+  set_random_name();
   let canvas = document.getElementById("demo1");
   canvas.style.opacity = "0.0";
   var context = canvas.getContext("2d");
   let fixed_update_interval = 1e3 / 60;
-  function addEmoji(emoji, x, y) {
-    let emojiElement = document.createElement("div");
-    emojiElement.style.position = "absolute";
-    emojiElement.style.left = x + "px";
-    emojiElement.style.top = y + "px";
-    emojiElement.style.display = "flex";
-    emojiElement.style.justifyContent = "center";
-    emojiElement.style.alignItems = "center";
-    emojiElement.style.fontSize = "35px";
-    emojiElement.innerText = emoji;
-    emojiElement.style.transform = "translate(-50%, -50%)";
-    document.body.appendChild(emojiElement);
-    return emojiElement;
-  }
-  function addSVGArrow(x1, y1, x2, y2) {
-    const stroke_width = 6;
-    const padding = 20;
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("style", "position: absolute;");
-    svg.setAttribute("width", `${Math.abs(x2 - x1) + padding * 2}`);
-    svg.setAttribute("height", `${Math.abs(y2 - y1) + padding * 2}`);
-    const minX = Math.min(x1, x2);
-    const minY = Math.min(y1, y2);
-    svg.setAttribute("style", `position: absolute; top: ${minY - padding}px; left: ${minX - padding}px;`);
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", `${Math.abs(x1 - minX) + padding}`);
-    line.setAttribute("y1", `${Math.abs(y1 - minY) + padding}`);
-    line.setAttribute("x2", `${Math.abs(x2 - minX) + padding}`);
-    line.setAttribute("y2", `${Math.abs(y2 - minY) + padding}`);
-    line.setAttribute("style", `stroke: currentColor; stroke-width: ${stroke_width}; stroke-dasharray: 20`);
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    let distance = Math.sqrt(dx * dx + dy * dy);
-    if (distance == 0) {
-      distance = 0.1;
-    }
-    const normalized_dx = dx / distance;
-    const normalized_dy = dy / distance;
-    const size = 10;
-    const center_x = x2 + padding - normalized_dx * size - minX;
-    const center_y = y2 + padding - normalized_dy * size - minY;
-    const perp_x = normalized_dy;
-    const perp_y = -normalized_dx;
-    const left_x = center_x - perp_x * size;
-    const left_y = center_y - perp_y * size;
-    const right_x = center_x + perp_x * size;
-    const right_y = center_y + perp_y * size;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${left_x} ${left_y}, L ${x2 - minX + padding} ${y2 - minY + padding}, L ${right_x} ${right_y}`);
-    path.setAttribute("style", `stroke:currentColor; stroke-width: ${stroke_width}; fill: none; stroke-linejoin:round; stroke-linecap:round;`);
-    svg.appendChild(line);
-    svg.appendChild(path);
-    document.body.appendChild(svg);
-    return svg;
-  }
-  function addSVGCircle(x, y, radius) {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("width", `${radius * 2}`);
-    svg.setAttribute("height", `${radius * 2}`);
-    svg.style.position = "absolute";
-    svg.style.left = `${x - radius}px`;
-    svg.style.top = `${y - radius}px`;
-    document.body.appendChild(svg);
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("cx", `${radius}`);
-    circle.setAttribute("cy", `${radius}`);
-    circle.setAttribute("r", `${radius}`);
-    svg.appendChild(circle);
-    svg.style.filter = "drop-shadow(2px 3px 2px rgb(0 0 0 / 0.4))";
-    return svg;
-  }
-  ;
   let imports = {
     env: {
       set_color: function(r, g, b, a) {
         context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
       },
-      draw_text: function(x, y, text_address, text_length) {
-        let text = tangle.read_string(text_address, text_length);
-        extra_elements.push(addEmoji(text, x, y));
-      },
       draw_circle: function(x, y, radius) {
         context.beginPath();
         context.arc(x, y, radius, 0, 2 * Math.PI);
         context.fill();
-      },
-      draw_arrow: function(x0, y0, x1, y1) {
-        extra_elements.push(addSVGArrow(x0, y0, x1, y1));
       },
       begin_path: function() {
         context.beginPath();
@@ -1516,7 +1444,7 @@ async function setup_demo1() {
       if (state == 1 /* Connected */) {
         canvas.style.opacity = "1.0";
         if (exports.player_joined) {
-          exports.player_joined([UserId]);
+          exports.player_joined(UserId);
         }
       }
     }
@@ -1538,8 +1466,6 @@ async function setup_demo1() {
   document.onpointerup = async (event) => {
     let rect = canvas.getBoundingClientRect();
     if (exports.pointer_up) {
-      console.log("EVENT POINTER TYPE: ", event.pointerType);
-      console.log(event.pointerType === "mouse");
       exports.pointer_up(UserId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
     }
   };
@@ -1547,9 +1473,6 @@ async function setup_demo1() {
     let rect = canvas.getBoundingClientRect();
     if (exports.key_down) {
       exports.key_down(UserId, event.keyCode);
-    }
-    if (event.key == "h") {
-      tangle.print_history();
     }
   };
   document.onkeyup = async (event) => {
@@ -1563,15 +1486,186 @@ async function setup_demo1() {
       canvas.width = canvas.clientWidth;
       canvas.height = canvas.clientHeight;
     }
-    extra_elements.forEach((element) => {
-      element.remove();
-    });
-    extra_elements = [];
     context.clearRect(0, 0, context.canvas.width, context.canvas.height);
     exports.draw.callAndRevert();
     window.requestAnimationFrame(animation);
   }
   animation();
 }
+function set_random_name() {
+  if (!window.location.hash) {
+    window.location.hash += ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+    window.location.hash += ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+    window.location.hash += ANIMAL_NAMES[Math.floor(Math.random() * ANIMAL_NAMES.length)];
+  }
+}
+var ANIMAL_NAMES = [
+  "Albatross",
+  "Alligator",
+  "Alpaca",
+  "Antelope",
+  "Donkey",
+  "Badger",
+  "Bat",
+  "Bear",
+  "Bee",
+  "Bison",
+  "Buffalo",
+  "Butterfly",
+  "Camel",
+  "Capybara",
+  "Cat",
+  "Cheetah",
+  "Chicken",
+  "Chinchilla",
+  "Clam",
+  "Cobra",
+  "Crab",
+  "Crane",
+  "Crow",
+  "Deer",
+  "Dog",
+  "Dolphin",
+  "Dove",
+  "Dragonfly",
+  "Duck",
+  "Eagle",
+  "Elephant",
+  "Elk",
+  "Emu",
+  "Falcon",
+  "Ferret",
+  "Finch",
+  "Fish",
+  "Flamingo",
+  "Fox",
+  "Frog",
+  "Gazelle",
+  "Gerbil",
+  "Giraffe",
+  "Goat",
+  "Goldfish",
+  "Goose",
+  "Grasshopper",
+  "Hamster",
+  "Heron",
+  "Horse",
+  "Hyena",
+  "Jaguar",
+  "Jellyfish",
+  "Kangaroo",
+  "Koala",
+  "Lemur",
+  "Lion",
+  "Lobster",
+  "Manatee",
+  "Mantis",
+  "Meerkat",
+  "Mongoose",
+  "Moose",
+  "Mouse",
+  "Narwhal",
+  "Octopus",
+  "Okapi",
+  "Otter",
+  "Owl",
+  "Panther",
+  "Parrot",
+  "Pelican",
+  "Penguin",
+  "Pony",
+  "Porcupine",
+  "Rabbit",
+  "Raccoon",
+  "Raven",
+  "Salmon",
+  "Seahorse",
+  "Seal",
+  "Shark",
+  "Snake",
+  "Sparrow",
+  "Stingray",
+  "Stork",
+  "Swan",
+  "Tiger",
+  "Turtle",
+  "Viper",
+  "Walrus",
+  "Wolf",
+  "Wolverine",
+  "Wombat",
+  "Yak",
+  "Zebra",
+  "Gnome",
+  "Unicorn",
+  "Dragon",
+  "Hippo"
+];
+var ADJECTIVES = [
+  "Beefy",
+  "Big",
+  "Bold",
+  "Brave",
+  "Bright",
+  "Buff",
+  "Calm",
+  "Charming",
+  "Chill",
+  "Creative",
+  "Cute",
+  "Cool",
+  "Crafty",
+  "Cunning",
+  "Daring",
+  "Elegant",
+  "Excellent",
+  "Fab",
+  "Fluffy",
+  "Grand",
+  "Green",
+  "Happy",
+  "Heavy",
+  "Honest",
+  "Huge",
+  "Humble",
+  "Iconic",
+  "Immense",
+  "Jolly",
+  "Jumbo",
+  "Kind",
+  "Little",
+  "Loyal",
+  "Lucky",
+  "Majestic",
+  "Noble",
+  "Nefarious",
+  "Odd",
+  "Ornate",
+  "Plucky",
+  "Plump",
+  "Polite",
+  "Posh",
+  "Quirky",
+  "Quick",
+  "Round",
+  "Relaxed",
+  "Rotund",
+  "Shy",
+  "Sleek",
+  "Sly",
+  "Spry",
+  "Stellar",
+  "Super",
+  "Tactical",
+  "Tidy",
+  "Trendy",
+  "Unique",
+  "Vivid",
+  "Wild",
+  "Yappy",
+  "Young",
+  "Zany",
+  "Zesty"
+];
 setup_demo1();
 //# sourceMappingURL=index.js.map
