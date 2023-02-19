@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-kmath = {path = "../../koi2/crates/kmath"}
+kmath = {git = "https://github.com/kettle11/koi"}
 rapier2d = "0.14.0"
 once_cell = "1.17.0"
 oorandom = "11.1.3"
