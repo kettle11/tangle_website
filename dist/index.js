@@ -115,7 +115,7 @@ var Room = class {
         console.log("[room] Requesting to join room: ", this._configuration.room_name);
         server_socket.send(JSON.stringify({ "join_room": this._configuration.room_name }));
         clearInterval(keep_alive_interval);
-        keep_alive_interval = setInterval(function () {
+        keep_alive_interval = setInterval(function() {
           server_socket.send("keep_alive");
         }, 1e4);
       };
@@ -136,12 +136,12 @@ var Room = class {
           }
           this._configuration.on_state_change?.(this._current_state);
         }
-        setTimeout(function () {
+        setTimeout(function() {
           console.log("[room] Attempting to reconnect to server...");
           connect_to_server();
         }, 250);
       };
-      server_socket.onerror = function (error) {
+      server_socket.onerror = function(error) {
         console.log(`[room] Server socket error:`, error);
         server_socket.close();
       };
@@ -453,13 +453,13 @@ var RustUtilities = class {
   static async setup() {
     const imports = {
       env: {
-        external_log: function (pointer, length) {
+        external_log: function(pointer, length) {
           const memory = rust_utilities.instance.exports.memory;
           const message_data = new Uint8Array(memory.buffer, pointer, length);
           const decoded_string = decoder.decode(new Uint8Array(message_data));
           console.log(decoded_string);
         },
-        external_error: function (pointer, length) {
+        external_error: function(pointer, length) {
           const memory = rust_utilities.instance.exports.memory;
           const message_data = new Uint8Array(memory.buffer, pointer, length);
           const decoded_string = decoder.decode(new Uint8Array(message_data));
@@ -659,23 +659,23 @@ var TimeMachine = class {
     this._progress_recurring_function_calls(time_stamp.time);
     let i = this._events.length - 1;
     outer_loop:
-    for (; i >= 0; i -= 1) {
-      switch (time_stamp_compare(this._events[i].time_stamp, time_stamp)) {
-        case -1:
-          break outer_loop;
-        case 1:
-          break;
-        case 0: {
-          const event2 = this._events[i];
-          if (function_export_index != event2.function_export_index || !array_equals(args, event2.args)) {
-            console.error("[tangle warning] Attempted to call a function with a duplicate time stamp.");
-            console.log("Event Time: ", time_stamp);
-            console.log("Function name: ", this.get_function_name(function_export_index));
+      for (; i >= 0; i -= 1) {
+        switch (time_stamp_compare(this._events[i].time_stamp, time_stamp)) {
+          case -1:
+            break outer_loop;
+          case 1:
+            break;
+          case 0: {
+            const event2 = this._events[i];
+            if (function_export_index != event2.function_export_index || !array_equals(args, event2.args)) {
+              console.error("[tangle warning] Attempted to call a function with a duplicate time stamp.");
+              console.log("Event Time: ", time_stamp);
+              console.log("Function name: ", this.get_function_name(function_export_index));
+            }
+            return;
           }
-          return;
         }
       }
-    }
     if (time_stamp_compare(time_stamp, this._current_simulation_time) == -1) {
       if (this._need_to_rollback_to_time === void 0 || time_stamp_compare(time_stamp, this._need_to_rollback_to_time) == -1) {
         this._need_to_rollback_to_time = time_stamp;
@@ -974,7 +974,7 @@ var Tangle = class {
       Object.values(importObject).forEach((moduleImports) => {
         Object.entries(moduleImports).forEach(([importName, importValue]) => {
           if (typeof importValue === "function") {
-            moduleImports[importName] = function (...args) {
+            moduleImports[importName] = function(...args) {
               const r = importValue(...args);
               if (r !== void 0) {
                 console.log("[tangle warning] Tangle prevents WebAssembly imports from returning values because those values are unique per-peer and would cause a desync.");
@@ -1398,41 +1398,41 @@ async function setup_demo1() {
   let fixed_update_interval = 1e3 / 60;
   let imports = {
     env: {
-      set_color: function (r, g, b, a) {
+      set_color: function(r, g, b, a) {
         context.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
       },
-      draw_circle: function (x, y, radius) {
+      draw_circle: function(x, y, radius) {
         context.beginPath();
         context.arc(x, y, radius, 0, 2 * Math.PI);
         context.fill();
       },
-      begin_path: function () {
+      begin_path: function() {
         context.beginPath();
       },
-      move_to: function (x, y) {
+      move_to: function(x, y) {
         context.moveTo(x, y);
       },
-      line_to: function (x, y) {
+      line_to: function(x, y) {
         context.lineTo(x, y);
       },
-      stroke: function () {
+      stroke: function() {
         context.stroke();
       },
-      fill: function () {
+      fill: function() {
         context.fill();
       },
-      translate: function (x, y) {
+      translate: function(x, y) {
         context.translate(x, y);
       },
-      rotate: function (radians) {
+      rotate: function(radians) {
         context.rotate(radians);
       },
-      draw_rect: function (x, y, width, height) {
+      draw_rect: function(x, y, width, height) {
         context.beginPath();
         context.rect(x, y, width, height);
         context.fill();
       },
-      set_transform: function (a, b, c, d, e, f) {
+      set_transform: function(a, b, c, d, e, f) {
         context.setTransform(a, b, c, d, e, f);
       }
     }
@@ -1454,19 +1454,19 @@ async function setup_demo1() {
   document.onpointerdown = async (event) => {
     let rect = canvas.getBoundingClientRect();
     if (exports.pointer_down) {
-      exports.pointer_down(UserId, event.clientX - rect.left, event.clientY - rect.top);
+      exports.pointer_down(UserId, event.pointerId, event.clientX - rect.left, event.clientY - rect.top);
     }
   };
   document.onpointermove = async (event) => {
     let rect = canvas.getBoundingClientRect();
     if (exports.pointer_move) {
-      exports.pointer_move(UserId, event.clientX - rect.left, event.clientY - rect.top);
+      exports.pointer_move(UserId, event.pointerId, event.clientX - rect.left, event.clientY - rect.top);
     }
   };
   document.onpointerup = async (event) => {
     let rect = canvas.getBoundingClientRect();
     if (exports.pointer_up) {
-      exports.pointer_up(UserId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
+      exports.pointer_up(UserId, event.pointerId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
     }
   };
   document.onkeydown = async (event) => {

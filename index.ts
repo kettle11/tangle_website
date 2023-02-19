@@ -72,14 +72,14 @@ async function setup_demo1() {
     document.onpointerdown = async (event) => {
         let rect = canvas.getBoundingClientRect();
         if (exports.pointer_down) {
-            exports.pointer_down(UserId, event.clientX - rect.left, event.clientY - rect.top);
+            exports.pointer_down(UserId, event.pointerId, event.clientX - rect.left, event.clientY - rect.top);
         }
     };
 
     document.onpointermove = async (event) => {
         let rect = canvas.getBoundingClientRect();
         if (exports.pointer_move) {
-            exports.pointer_move(UserId, event.clientX - rect.left, event.clientY - rect.top);
+            exports.pointer_move(UserId, event.pointerId, event.clientX - rect.left, event.clientY - rect.top);
         }
     };
 
@@ -87,7 +87,7 @@ async function setup_demo1() {
         let rect = canvas.getBoundingClientRect();
 
         if (exports.pointer_up) {
-            exports.pointer_up(UserId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
+            exports.pointer_up(UserId, event.pointerId, event.pointerType === "mouse", event.clientX - rect.left, event.clientY - rect.top);
         }
     };
 

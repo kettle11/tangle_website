@@ -9,16 +9,19 @@ pub enum Event {
     },
     PointerMove {
         player: u32,
+        pointer_id: u32,
         x: f32,
         y: f32,
     },
     PointerDown {
         player: u32,
+        pointer_id: u32,
         x: f32,
         y: f32,
     },
     PointerUp {
         player: u32,
+        pointer_id: u32,
         is_mouse: bool,
         x: f32,
         y: f32,
@@ -43,19 +46,31 @@ extern "C" fn peer_left(player: u32) {
 }
 
 #[no_mangle]
-extern "C" fn pointer_down(player: u32, x: f32, y: f32) {
-    send_event(Event::PointerDown { player, x: x, y: y })
+extern "C" fn pointer_down(player: u32, pointer_id: u32, x: f32, y: f32) {
+    send_event(Event::PointerDown {
+        player,
+        pointer_id,
+        x: x,
+        y: y,
+    })
 }
 
 #[no_mangle]
-extern "C" fn pointer_move(player: u32, x: f32, y: f32) {
-    send_event(Event::PointerMove { player, x: x, y: y })
+extern "C" fn pointer_move(player: u32, pointer_id: u32, x: f32, y: f32) {
+    log(&format!("POINTER ID: {:?}", pointer_id));
+    send_event(Event::PointerMove {
+        player,
+        pointer_id,
+        x: x,
+        y: y,
+    })
 }
 
 #[no_mangle]
-extern "C" fn pointer_up(player: u32, is_mouse: bool, x: f32, y: f32) {
+extern "C" fn pointer_up(player: u32, pointer_id: u32, is_mouse: bool, x: f32, y: f32) {
     send_event(Event::PointerUp {
         player,
+        pointer_id,
         is_mouse,
         x: x,
         y: y,

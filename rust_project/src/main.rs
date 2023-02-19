@@ -7,7 +7,7 @@ use rapier2d::{na::Point2, prelude::*};
 
 const WORLD_SCALE_FACTOR: f32 = 0.05 / 20.0;
 
-struct PlayerData {
+struct PlayerPointerInfo {
     moving_collider: Option<ColliderHandle>,
     cursor_position: Vec2,
     last_cursor_position: Vec2,
@@ -15,6 +15,20 @@ struct PlayerData {
     cursor_down: bool,
     render: bool,
     color: (u8, u8, u8),
+}
+
+impl PlayerPointerInfo {
+    fn new(color: (u8, u8, u8)) -> Self {
+        Self {
+            moving_collider: None,
+            cursor_position: Vec2::ZERO,
+            last_cursor_position: Vec2::ZERO,
+            offset: Vec2::ZERO,
+            cursor_down: false,
+            render: false,
+            color,
+        }
+    }
 }
 
 struct PhysicsObject {
@@ -31,7 +45,10 @@ const COLORS: &[(u8, u8, u8)] = &[
 ];
 
 fn main() {
-    let mut players: HashMap<u32, PlayerData> = HashMap::new();
+    // The key is the player id and the pointer id.
+    let mut player_pointers: HashMap<(u32, u32), PlayerPointerInfo> = HashMap::new();
+    let mut player_colors = HashMap::new();
+
     let mut rapier = RapierIntegration::new();
     // let random = oorandom::Rand32::new(14);
     let mut physics_objects = Vec::new();
@@ -113,15 +130,15 @@ fn main() {
 
     mini_engine::run(move |event| match event {
         Event::FixedUpdate => {
-            for player in players.values() {
-                if let Some(collider) = player.moving_collider {
+            for pointer in player_pointers.values() {
+                if let Some(collider) = pointer.moving_collider {
                     let collider = rapier.collider_set.get(collider).unwrap();
                     let rigid_body = rapier
                         .rigid_body_set
                         .get_mut(collider.parent().unwrap())
                         .unwrap();
 
-                    let p = player.cursor_position + player.offset;
+                    let p = pointer.cursor_position + pointer.offset;
                     rigid_body.set_translation([p.x, p.y].into(), true);
                 }
             }
@@ -177,53 +194,69 @@ fn main() {
                 }
             }
 
-            for player in players.values() {
-                if player.render {
-                    let p = player.cursor_position / WORLD_SCALE_FACTOR;
-                    let (radius, alpha) = if player.cursor_down {
+            for pointer in player_pointers.values() {
+                if pointer.render {
+                    let p = pointer.cursor_position / WORLD_SCALE_FACTOR;
+                    let (radius, alpha) = if pointer.cursor_down {
                         (0.02, 255)
                     } else {
                         (0.03, 150)
                     };
-                    set_color(player.color.0, player.color.1, player.color.2, alpha);
+                    set_color(pointer.color.0, pointer.color.1, pointer.color.2, alpha);
                     draw_circle(p.x, p.y, radius / WORLD_SCALE_FACTOR);
                 }
             }
         }
         Event::PlayerJoined { player } => {
             log(&format!("Player Joined: {:?}", player));
-
-            players.insert(
+            player_colors.insert(
                 player,
-                PlayerData {
-                    moving_collider: None,
-                    cursor_position: Vec2::ZERO,
-                    last_cursor_position: Vec2::ZERO,
-                    offset: Vec2::ZERO,
-                    cursor_down: false,
-                    render: false,
-                    color: COLORS[random.rand_range(0..COLORS.len() as _) as usize],
-                },
+                COLORS[random.rand_range(0..COLORS.len() as _) as usize],
             );
         }
         Event::PlayerLeft { player } => {
             log(&format!("Player left: {:?}", player));
-            players.remove(&player);
-            // if let Some(player_data) = players.remove(&player) {}
-        }
-        Event::PointerMove { player, x, y } => {
-            if let Some(player) = players.get_mut(&player) {
-                let world_position = Vec2::new(x, y) * WORLD_SCALE_FACTOR;
-                player.last_cursor_position = player.cursor_position;
-                player.cursor_position = world_position;
+            player_colors.remove(&player);
+
+            let mut to_remove = Vec::new();
+            for key in player_pointers.keys() {
+                if key.0 == player {
+                    to_remove.push(*key);
+                }
+            }
+            for key in to_remove {
+                player_pointers.remove(&key);
             }
         }
-        Event::PointerDown { player, x, y } => {
-            if let Some(player) = players.get_mut(&player) {
-                player.render = true;
-                player.cursor_down = true;
+        Event::PointerMove {
+            player,
+            pointer_id,
+            x,
+            y,
+        } => {
+            if let Some(player_color) = player_colors.get(&player) {
+                let entry = player_pointers.entry((player, pointer_id));
+                let pointer = entry.or_insert_with(|| PlayerPointerInfo::new(*player_color));
+
                 let world_position = Vec2::new(x, y) * WORLD_SCALE_FACTOR;
-                player.cursor_position = world_position;
+                pointer.last_cursor_position = pointer.cursor_position;
+                pointer.cursor_position = world_position;
+            }
+        }
+        Event::PointerDown {
+            player,
+            pointer_id,
+            x,
+            y,
+        } => {
+            if let Some(player_color) = player_colors.get(&player) {
+                let entry = player_pointers.entry((player, pointer_id));
+                let pointer = entry.or_insert_with(|| PlayerPointerInfo::new(*player_color));
+
+                pointer.render = true;
+                pointer.cursor_down = true;
+                let world_position = Vec2::new(x, y) * WORLD_SCALE_FACTOR;
+                pointer.cursor_position = world_position;
                 if let Some((collider_handle, position)) = rapier.query_pipeline.project_point(
                     &rapier.rigid_body_set,
                     &rapier.collider_set,
@@ -239,8 +272,8 @@ fn main() {
 
                     let rigid_body_position = rigid_body.translation();
                     if position.is_inside {
-                        player.moving_collider = Some(collider_handle);
-                        player.offset = Vec2::new(rigid_body_position.x, rigid_body_position.y)
+                        pointer.moving_collider = Some(collider_handle);
+                        pointer.offset = Vec2::new(rigid_body_position.x, rigid_body_position.y)
                             - world_position;
                         rigid_body.set_gravity_scale(0.0, true);
                         rigid_body.set_angvel(0.0, false);
@@ -251,26 +284,30 @@ fn main() {
         }
         Event::PointerUp {
             player,
+            pointer_id,
             is_mouse,
             x: _,
             y: _,
         } => {
-            if let Some(player) = players.get_mut(&player) {
+            if let Some(player_color) = player_colors.get(&player) {
+                let entry = player_pointers.entry((player, pointer_id));
+                let pointer = entry.or_insert_with(|| PlayerPointerInfo::new(*player_color));
+
                 // Do not render touch or stylus events that are no longer occurring.
-                player.render = is_mouse;
-                player.cursor_down = false;
-                if let Some(collider) = player.moving_collider {
+                pointer.render = is_mouse;
+                pointer.cursor_down = false;
+                if let Some(collider) = pointer.moving_collider {
                     let collider = rapier.collider_set.get(collider).unwrap();
                     let rigid_body = rapier
                         .rigid_body_set
                         .get_mut(collider.parent().unwrap())
                         .unwrap();
 
-                    let velocity = (player.cursor_position - player.last_cursor_position) * 30.0;
+                    let velocity = (pointer.cursor_position - pointer.last_cursor_position) * 30.0;
                     rigid_body.set_linvel([velocity.x, velocity.y].into(), true);
                     rigid_body.set_gravity_scale(1.0, true);
                     rigid_body.set_angular_damping(0.2);
-                    player.moving_collider = None;
+                    pointer.moving_collider = None;
                 }
             }
         }
