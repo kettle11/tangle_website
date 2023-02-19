@@ -1470,13 +1470,11 @@ async function setup_demo1() {
     }
   };
   document.onkeydown = async (event) => {
-    let rect = canvas.getBoundingClientRect();
     if (exports.key_down) {
       exports.key_down(UserId, event.keyCode);
     }
   };
   document.onkeyup = async (event) => {
-    let rect = canvas.getBoundingClientRect();
     if (exports.key_up) {
       exports.key_up(UserId, event.keyCode);
     }
