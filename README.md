@@ -17,7 +17,7 @@ This code is messy but I'm making it available for those who want to learn from 
 
 ## Building
 
-The build expects the [`tangle`](https://github.com/kettle11/tangle) repository to be adjacent to the `tangle_website` repository.
+The build expects the [`tangle`](https://github.com/kettle11/tangle) and [`koi2`](https://github.com/kettle11/koi2) (koi, but named koi2 on your file system) repositories to be adjacent to the `tangle_website` repository.
 
 You also need `npm` and Rust installed.  `devserver` is used as the test server which can be installed with `cargo install devserver`.
 
