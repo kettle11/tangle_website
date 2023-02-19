@@ -55,7 +55,7 @@ async function setup_demo1() {
 
     let wasm_binary = await fetch("rust_project.wasm").then(response => response.arrayBuffer());
 
-    let result = await Tangle.instanstiate(new Uint8Array(wasm_binary), imports, {
+    let result = await Tangle.instantiate(new Uint8Array(wasm_binary), imports, {
         fixed_update_interval,
         on_state_change_callback: (state) => {
             if (state == TangleState.Connected) {
